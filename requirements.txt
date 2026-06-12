@@ -1,0 +1,19 @@
+# Env file loading (for HF_HUB_OFFLINE and other settings)
+python-dotenv>=1.0.0
+
+# Core RAG stack
+llama-index>=0.10.0
+llama-index-llms-ollama>=0.3.0
+llama-index-embeddings-ollama>=0.3.0
+
+# PDF parsing (IBM Docling — LaTeX/table-aware)
+docling>=2.0.0
+
+# PDF parsing (marker-pdf — ML-based, proper LaTeX formulas for academic PDFs)
+marker-pdf>=1.10.0
+
+# LaTeX → Unicode conversion for terminal display
+pylatexenc>=2.0
+
+# Terminal UI
+rich>=13.7.0
