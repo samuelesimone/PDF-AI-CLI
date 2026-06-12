@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PDF-AI</title>
+
+  <!-- KaTeX for LaTeX rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+
+  <!-- marked.js for Markdown rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────────── */
+    header {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-shrink: 0;
+    }
+    header .logo {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #58a6ff;
+      letter-spacing: 0.04em;
+    }
+    header .sep { color: #30363d; }
+    header .doc-name {
+      font-size: 0.85rem;
+      color: #c9d1d9;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 40vw;
+    }
+    header .model-info {
+      font-size: 0.75rem;
+      color: #6e7681;
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
+    /* ── Chat area ──────────────────────────────────────────────────────── */
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    #chat::-webkit-scrollbar { width: 5px; }
+    #chat::-webkit-scrollbar-track { background: transparent; }
+    #chat::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+    /* ── Messages ───────────────────────────────────────────────────────── */
+    .msg { display: flex; flex-direction: column; max-width: 82%; }
+    .msg.user  { align-self: flex-end;   align-items: flex-end; }
+    .msg.assistant { align-self: flex-start; align-items: flex-start; }
+
+    .bubble {
+      padding: 12px 16px;
+      border-radius: 14px;
+      line-height: 1.65;
+      word-break: break-word;
+    }
+    .msg.user .bubble {
+      background: #1f6feb;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+      white-space: pre-wrap;
+    }
+    .msg.assistant .bubble {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-bottom-left-radius: 4px;
+      width: 100%;
+    }
+
+    /* ── Markdown content ───────────────────────────────────────────────── */
+    .md-body p { margin-bottom: 0.65em; }
+    .md-body p:last-child { margin-bottom: 0; }
+    .md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+      margin: 0.9em 0 0.45em;
+      color: #e6edf3;
+      line-height: 1.3;
+    }
+    .md-body ul, .md-body ol { padding-left: 1.6em; margin-bottom: 0.65em; }
+    .md-body li { margin-bottom: 0.2em; }
+    .md-body code {
+      background: #0d1117;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.85em;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      color: #f0883e;
+    }
+    .md-body pre {
+      background: #0d1117;
+      padding: 14px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 0.7em 0;
+      border: 1px solid #21262d;
+    }
+    .md-body pre code { background: none; padding: 0; color: #e6edf3; font-size: 0.82em; }
+    .md-body blockquote {
+      border-left: 3px solid #30363d;
+      padding-left: 14px;
+      color: #8b949e;
+      margin: 0.5em 0;
+    }
+    .md-body table { border-collapse: collapse; width: 100%; margin: 0.7em 0; font-size: 0.88em; }
+    .md-body th, .md-body td { border: 1px solid #30363d; padding: 6px 12px; text-align: left; }
+    .md-body th { background: #0d1117; color: #8b949e; font-weight: 600; }
+    .md-body hr { border: none; border-top: 1px solid #30363d; margin: 0.8em 0; }
+
+    /* ── KaTeX display math ─────────────────────────────────────────────── */
+    .katex-display { margin: 0.8em 0; overflow-x: auto; }
+
+    /* ── Thinking block ─────────────────────────────────────────────────── */
+    .thinking-block {
+      font-size: 0.8rem;
+      color: #8b949e;
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 10px 14px;
+      max-height: 240px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      white-space: pre-wrap;
+      line-height: 1.5;
+    }
+
+    /* ── Details / collapsible ──────────────────────────────────────────── */
+    details { font-size: 0.8rem; margin-top: 6px; }
+    details summary {
+      cursor: pointer;
+      color: #58a6ff;
+      user-select: none;
+      padding: 3px 0;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    details summary::before { content: "▸"; font-size: 0.7em; transition: transform 0.15s; }
+    details[open] summary::before { transform: rotate(90deg); }
+    details summary:hover { color: #79c0ff; }
+    details[open] summary { margin-bottom: 8px; }
+
+    /* ── Sources ────────────────────────────────────────────────────────── */
+    .sources-list { display: flex; flex-direction: column; gap: 6px; }
+    .source-item {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 8px 12px;
+    }
+    .source-meta { font-size: 0.7rem; color: #6e7681; margin-bottom: 4px; }
+    .source-text { font-size: 0.78rem; color: #8b949e; line-height: 1.45; }
+
+    /* ── Meta row (badge + timing) ──────────────────────────────────────── */
+    .meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 5px;
+      font-size: 0.72rem;
+      color: #6e7681;
+    }
+    .badge {
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.69rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .badge.explain { background: #3d2c0a; color: #e3b341; }
+    .badge.strict  { background: #161b22; color: #6e7681; border: 1px solid #30363d; }
+
+    /* ── Typing indicator ───────────────────────────────────────────────── */
+    .typing-bubble {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 14px;
+      border-bottom-left-radius: 4px;
+      padding: 12px 18px;
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+    .dot {
+      width: 7px; height: 7px;
+      background: #58a6ff;
+      border-radius: 50%;
+      animation: bounce 1.3s infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+      30% { transform: translateY(-6px); opacity: 1; }
+    }
+
+    /* ── Input area ─────────────────────────────────────────────────────── */
+    #input-area {
+      background: #161b22;
+      border-top: 1px solid #30363d;
+      padding: 14px 20px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+      flex-shrink: 0;
+    }
+    #question {
+      flex: 1;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      color: #e6edf3;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      font-family: inherit;
+      line-height: 1.55;
+      resize: none;
+      min-height: 44px;
+      max-height: 160px;
+      outline: none;
+      overflow-y: auto;
+    }
+    #question:focus { border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,.15); }
+    #question::placeholder { color: #6e7681; }
+    #send-btn {
+      background: #238636;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 20px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 600;
+      white-space: nowrap;
+      height: 44px;
+      transition: background 0.15s;
+    }
+    #send-btn:hover:not(:disabled) { background: #2ea043; }
+    #send-btn:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+
+    /* ── Welcome message ────────────────────────────────────────────────── */
+    .welcome {
+      align-self: center;
+      text-align: center;
+      color: #6e7681;
+      font-size: 0.85rem;
+      padding: 20px;
+      max-width: 480px;
+    }
+    .welcome strong { color: #8b949e; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="logo">PDF-AI</span>
+  <span class="sep">·</span>
+  <span class="doc-name" id="doc-name">Loading…</span>
+  <span class="model-info" id="model-info"></span>
+</header>
+
+<div id="chat">
+  <div class="welcome" id="welcome">
+    <strong>Ask anything about your document.</strong><br/>
+    LaTeX formulas are rendered automatically.
+    <br/><br/>
+    <em>strict mode</em> — factual questions answered from retrieved passages only.<br/>
+    <em>explain mode</em> — triggered by "explain…", "how does…", "derive…" etc.
+  </div>
+</div>
+
+<div id="input-area">
+  <textarea
+    id="question"
+    placeholder="Ask a question… (Enter to send · Shift+Enter for newline)"
+    rows="1"
+  ></textarea>
+  <button id="send-btn">Send</button>
+</div>
+
+<script>
+  // ── marked.js configuration ───────────────────────────────────────────────
+  marked.use({ gfm: true, breaks: false });
+
+  // ── Math-safe render: LaTeX → KaTeX, text → marked ───────────────────────
+  function renderContent(raw) {
+    if (!raw) return '';
+    const stash = [];
+    let n = 0;
+
+    function tok(math, display) {
+      const id = `PDFAIMATHX${n++}XEND`;
+      stash.push({ id, math, display });
+      return id;
+    }
+
+    // Extract math blocks before markdown processing.
+    // Order: display ($$, \[) before inline ($, \() to avoid double-matching.
+    let text = raw
+      .replace(/\$\$([\s\S]*?)\$\$/g,    (_, m) => tok(m, true))
+      .replace(/\\\[([\s\S]*?)\\\]/g,     (_, m) => tok(m, true))
+      .replace(/\\\(([\s\S]*?)\\\)/g,     (_, m) => tok(m, false))
+      .replace(/(?<!\$)\$([^$\n]+)\$(?!\$)/g, (_, m) => tok(m, false));
+
+    // Render markdown
+    let html = marked.parse(text);
+
+    // Restore math with KaTeX
+    for (const { id, math, display } of stash) {
+      let rendered;
+      try {
+        rendered = katex.renderToString(math.trim(), {
+          displayMode: display,
+          throwOnError: false,
+          output: 'html',
+        });
+      } catch (_) {
+        // Fall back to raw LaTeX wrapped in <code>
+        rendered = display
+          ? `<pre><code>$$${math}$$</code></pre>`
+          : `<code>$${math}$</code>`;
+      }
+      html = html.split(id).join(rendered);
+    }
+
+    return html;
+  }
+
+  // ── DOM helpers ───────────────────────────────────────────────────────────
+  const chatEl   = document.getElementById('chat');
+  const questionEl = document.getElementById('question');
+  const sendBtn  = document.getElementById('send-btn');
+  const welcomeEl = document.getElementById('welcome');
+
+  function scrollBottom() {
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  function escHtml(s) {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ── Append user message ───────────────────────────────────────────────────
+  function appendUser(text) {
+    welcomeEl.style.display = 'none';
+    const div = document.createElement('div');
+    div.className = 'msg user';
+    div.innerHTML = `<div class="bubble">${escHtml(text)}</div>`;
+    chatEl.appendChild(div);
+    scrollBottom();
+  }
+
+  // ── Typing indicator ──────────────────────────────────────────────────────
+  function appendTyping() {
+    welcomeEl.style.display = 'none';
+    const wrap = document.createElement('div');
+    wrap.className = 'msg assistant';
+    wrap.innerHTML = `
+      <div class="typing-bubble">
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+      </div>`;
+    chatEl.appendChild(wrap);
+    scrollBottom();
+    return wrap;
+  }
+
+  // ── Build assistant message element ──────────────────────────────────────
+  function buildAssistant(data) {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg assistant';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+
+    // Optional thinking section
+    if (data.thinking) {
+      const det = document.createElement('details');
+      const sum = document.createElement('summary');
+      sum.textContent = `Thinking (${data.thinking.trim().split('\n').length} lines)`;
+      det.appendChild(sum);
+      const content = document.createElement('div');
+      content.className = 'thinking-block';
+      content.textContent = data.thinking;
+      det.appendChild(content);
+      bubble.appendChild(det);
+    }
+
+    // Answer
+    const answerDiv = document.createElement('div');
+    answerDiv.className = 'md-body';
+    answerDiv.innerHTML = renderContent(data.answer);
+    bubble.appendChild(answerDiv);
+
+    wrap.appendChild(bubble);
+
+    // Meta row: badge + timing
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const badge = document.createElement('span');
+    badge.className = `badge ${data.mode}`;
+    badge.textContent = data.mode;
+    const timing = document.createElement('span');
+    timing.textContent =
+      `retrieve ${data.retrieve_s}s · generate ${data.generate_s}s · total ${data.total_s}s`;
+    meta.appendChild(badge);
+    meta.appendChild(timing);
+    wrap.appendChild(meta);
+
+    // Sources (collapsible)
+    if (data.sources && data.sources.length > 0) {
+      const det = document.createElement('details');
+      const sum = document.createElement('summary');
+      const n = data.sources.length;
+      sum.textContent = `${n} source passage${n > 1 ? 's' : ''}`;
+      det.appendChild(sum);
+
+      const list = document.createElement('div');
+      list.className = 'sources-list';
+      for (const src of data.sources) {
+        const item = document.createElement('div');
+        item.className = 'source-item';
+
+        const srcMeta = document.createElement('div');
+        srcMeta.className = 'source-meta';
+        srcMeta.textContent = `score ${src.score}  ·  page ${src.page}`;
+
+        const srcText = document.createElement('div');
+        srcText.className = 'source-text';
+        const excerpt = src.text.length > 320
+          ? src.text.slice(0, 317) + '…'
+          : src.text;
+        srcText.textContent = excerpt;
+
+        item.appendChild(srcMeta);
+        item.appendChild(srcText);
+        list.appendChild(item);
+      }
+      det.appendChild(list);
+      wrap.appendChild(det);
+    }
+
+    return wrap;
+  }
+
+  // ── Send question ─────────────────────────────────────────────────────────
+  async function sendQuestion() {
+    const question = questionEl.value.trim();
+    if (!question || sendBtn.disabled) return;
+
+    questionEl.value = '';
+    questionEl.style.height = 'auto';
+    sendBtn.disabled = true;
+
+    appendUser(question);
+    const typing = appendTyping();
+
+    try {
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
+      });
+
+      if (!res.ok) {
+        const detail = await res.json().then(j => j.detail).catch(() => res.statusText);
+        throw new Error(detail);
+      }
+
+      const data = await res.json();
+      chatEl.removeChild(typing);
+      chatEl.appendChild(buildAssistant(data));
+      scrollBottom();
+    } catch (err) {
+      chatEl.removeChild(typing);
+      const errDiv = document.createElement('div');
+      errDiv.className = 'msg assistant';
+      errDiv.innerHTML = `
+        <div class="bubble" style="border-color:#f85149; color:#f85149;">
+          <strong>Error:</strong> ${escHtml(String(err))}
+        </div>`;
+      chatEl.appendChild(errDiv);
+      scrollBottom();
+    } finally {
+      sendBtn.disabled = false;
+      questionEl.focus();
+    }
+  }
+
+  // ── Auto-resize textarea ──────────────────────────────────────────────────
+  questionEl.addEventListener('input', () => {
+    questionEl.style.height = 'auto';
+    questionEl.style.height = Math.min(questionEl.scrollHeight, 160) + 'px';
+  });
+
+  // Enter = send, Shift+Enter = newline
+  questionEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendQuestion();
+    }
+  });
+
+  sendBtn.addEventListener('click', sendQuestion);
+
+  // ── Load document info ────────────────────────────────────────────────────
+  fetch('/info')
+    .then(r => r.json())
+    .then(info => {
+      document.getElementById('doc-name').textContent = info.document || '—';
+      document.getElementById('model-info').textContent =
+        info.llm_model ? `${info.llm_model}  ·  ${info.embed_model}` : '';
+      document.title = info.document ? `PDF-AI — ${info.document}` : 'PDF-AI';
+    })
+    .catch(() => {
+      document.getElementById('doc-name').textContent = 'Unknown document';
+    });
+
+  // Focus input on load
+  questionEl.focus();
+</script>
+</body>
+</html>

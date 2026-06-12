@@ -102,7 +102,38 @@ Copy the table below into your `.env` and adjust as needed.
 
 ## Usage
 
-### Chat with a PDF
+### Terminal chat
+
+```bash
+python main.py path/to/document.pdf
+```
+
+### Web UI
+
+```bash
+python web_ui.py path/to/document.pdf
+```
+
+Opens a browser-based chat interface at `http://localhost:7860`.
+LaTeX equations are rendered with **KaTeX** directly in the browser.
+All other options (`--model`, `--parser`, `--pages`, `--reindex`, etc.) work identically to the terminal version.
+
+```bash
+# Choose a port
+python web_ui.py doc.pdf --port 8080
+
+# Do not open browser automatically
+python web_ui.py doc.pdf --no-browser
+
+# Combine with any main.py option
+python web_ui.py book.pdf --pages 1-50 --parser marker --model qwen3.5:9b
+```
+
+> **Note:** The web UI loads KaTeX and marked.js from a CDN on first use (then browser-cached). All PDF processing and LLM inference remain fully local.
+
+---
+
+### Chat with a PDF (terminal)
 
 ```bash
 python main.py path/to/document.pdf
@@ -309,7 +340,8 @@ All tests are fully mocked — no Ollama server, no real PDF files, and no model
 
 ```
 PDF-AI/
-├── main.py                  # Entry point — CLI + pipeline wiring
+├── main.py                  # Terminal entry point — CLI + pipeline wiring
+├── web_ui.py                # Web UI entry point — FastAPI + browser chat
 ├── benchmark.py             # Parser benchmark CLI
 ├── check_index.py           # Index inspection CLI
 ├── .env                     # Local configuration (not committed)
@@ -330,6 +362,8 @@ PDF-AI/
 │   │   └── engine.py        # RAGEngine facade — retrieval + generation
 │   ├── chat/
 │   │   └── terminal.py      # Terminal REPL, LaTeX rendering, :latex toggle
+│   ├── web/
+│   │   └── index.html       # Single-page web UI (KaTeX + marked.js)
 │   └── inspection/
 │       └── inspector.py     # IndexInspector — reads docstore.json
 │
@@ -351,5 +385,7 @@ PDF-AI/
 | Page extraction | Local process (PyMuPDF) |
 | Vector storage | Local filesystem (`./storage/`) |
 | Model downloads | One-time, then `HF_HUB_OFFLINE=1` blocks further requests |
+| Web UI rendering | `localhost` (FastAPI + Uvicorn) |
+| KaTeX / marked.js | CDN on first load only, then browser-cached — no document data sent |
 
-No data is sent to any external API.
+No document content or queries are sent to any external API.

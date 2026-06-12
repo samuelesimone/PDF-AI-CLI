@@ -21,3 +21,7 @@ pylatexenc>=2.0
 
 # Terminal UI
 rich>=13.7.0
+
+# Web UI (FastAPI + Uvicorn — also pulled in transitively by mineru)
+fastapi>=0.100.0
+uvicorn>=0.23.0
