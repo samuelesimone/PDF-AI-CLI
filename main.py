@@ -7,6 +7,8 @@ Usage:
     python main.py path/to/book.pdf --model qwen3.5:9b
     python main.py path/to/book.pdf --top-k 8
     python main.py path/to/book.pdf --reindex
+    python main.py path/to/book.pdf --pages 1-50
+    python main.py path/to/book.pdf --pages 10-80 --parser marker
 """
 from __future__ import annotations
 
@@ -62,13 +64,26 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--parser",
-        choices=["docling", "pymupdf", "marker"],
+        choices=["docling", "pymupdf", "marker", "mineru"],
         default="docling",
         help=(
             "PDF parser to use (default: docling). "
             "'pymupdf' extracts raw text page-by-page (fast, no LaTeX). "
             "'marker' uses ML layout analysis to output proper LaTeX formulas "
-            "(best for math-heavy academic PDFs, slower on first run)."
+            "(best for math-heavy academic PDFs, slower on first run). "
+            "'mineru' uses MinerU VLM pipeline for high-accuracy LaTeX extraction "
+            "(backend controlled by MINERU_BACKEND env var: pipeline / vlm-engine / hybrid-engine)."
+        ),
+    )
+    p.add_argument(
+        "--pages",
+        default=None,
+        metavar="START-END",
+        help=(
+            "Page range to extract before parsing, e.g. '1-50' or '10-80'. "
+            "Both numbers are 1-based and inclusive. "
+            "The extracted PDF is cached in storage/pages/ so subsequent runs "
+            "with the same range reuse it without re-extracting."
         ),
     )
     return p.parse_args()
@@ -81,6 +96,71 @@ def _check_pdf(pdf_path: Path) -> None:
     if pdf_path.suffix.lower() != ".pdf":
         console.print(f"[red]Error:[/red] Expected a .pdf file, got: {pdf_path.suffix}")
         sys.exit(1)
+
+
+def _parse_page_range(pages: str) -> tuple[int, int]:
+    """Parse '1-50' into (1, 50). Raises ValueError on bad input."""
+    parts = pages.split("-")
+    if len(parts) != 2:
+        raise ValueError(
+            f"Invalid --pages value {pages!r}. "
+            "Expected format: START-END (e.g. '1-50')."
+        )
+    start, end = int(parts[0]), int(parts[1])
+    if start < 1 or end < start:
+        raise ValueError(
+            f"Invalid page range {pages!r}: "
+            "START must be ≥ 1 and END must be ≥ START."
+        )
+    return start, end
+
+
+def _extract_page_range(
+    pdf_path: Path,
+    start: int,
+    end: int,
+    storage_dir: Path,
+    force: bool = False,
+) -> Path:
+    """Extract pages [start, end] (1-based, inclusive) to a stable cached file.
+
+    The extracted PDF is saved to storage/pages/{stem}_p{start}-{end}.pdf so
+    subsequent runs with the same range hit the cache instantly.
+
+    Args:
+        pdf_path:    Original PDF.
+        start, end:  1-based, inclusive page range.
+        storage_dir: Root storage directory (from config).
+        force:       If True, re-extract even if the cached file exists.
+    """
+    import fitz  # PyMuPDF — already a hard dependency
+
+    pages_dir = storage_dir / "pages"
+    pages_dir.mkdir(parents=True, exist_ok=True)
+
+    out_path = pages_dir / f"{pdf_path.stem}_p{start}-{end}.pdf"
+
+    if out_path.exists() and not force:
+        return out_path
+
+    doc = fitz.open(str(pdf_path))
+    total = len(doc)
+
+    # Clamp to actual page count (1-based)
+    clamped_end = min(end, total)
+    if clamped_end < end:
+        console.print(
+            f"[yellow]Warning:[/yellow] document has {total} pages; "
+            f"clamping end from {end} to {clamped_end}."
+        )
+
+    extracted = fitz.open()
+    extracted.insert_pdf(doc, from_page=start - 1, to_page=clamped_end - 1)
+    extracted.save(str(out_path))
+    extracted.close()
+    doc.close()
+
+    return out_path
 
 
 def main() -> None:
@@ -100,6 +180,26 @@ def main() -> None:
         config.similarity_top_k = args.top_k
     if args.thinking:
         config.enable_thinking = True
+
+    # ── Page range extraction ────────────────────────────────────────────────
+    if args.pages:
+        try:
+            start, end = _parse_page_range(args.pages)
+        except ValueError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            sys.exit(1)
+
+        console.print(
+            f"[dim]Pages:[/dim] [cyan]{start}–{end}[/cyan]  "
+            f"[dim](extracting from {pdf_path.name})[/dim]"
+        )
+        pdf_path = _extract_page_range(
+            pdf_path, start, end, config.storage_dir,
+            force=args.reindex,
+        )
+        console.print(
+            f"[dim]Extracted:[/dim] [cyan]{pdf_path.name}[/cyan]"
+        )
 
     # ── Build pipeline ───────────────────────────────────────────────────────
     from src.indexing import RAGIndexer

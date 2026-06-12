@@ -10,8 +10,11 @@ Ask questions, get cited answers, and explore mathematical formulas — no data 
 ```
 PDF file
    │
+   ▼  (optional)
+--pages flag  →  extract page range  →  storage/pages/<name>_p{start}-{end}.pdf
+   │
    ▼
-Parser  (Docling / PyMuPDF / marker-pdf)
+Parser  (Docling / PyMuPDF / marker-pdf / MinerU)
    │  extracts text + LaTeX formulas
    ▼
 Indexer  (llama-index + SentenceSplitter)
@@ -89,6 +92,7 @@ Copy the table below into your `.env` and adjust as needed.
 | `STORAGE_DIR` | `./storage` | Where vector indexes are cached |
 | `HF_HUB_OFFLINE` | `1` | Block outbound HuggingFace requests |
 | `ENABLE_THINKING` | `false` | Enable qwen3 extended reasoning by default |
+| `MINERU_BACKEND` | `pipeline` | MinerU backend: `pipeline` (default), `vlm-engine`, `hybrid-engine` |
 
 > **Important:** Changing `EMBED_MODEL` invalidates all cached indexes.
 > Run with `--reindex` after switching embedding models.
@@ -122,14 +126,39 @@ python main.py doc.pdf --thinking
 # Choose a PDF parser (see Parsers section below)
 python main.py doc.pdf --parser marker
 python main.py doc.pdf --parser pymupdf
+python main.py doc.pdf --parser mineru
 python main.py doc.pdf --parser docling   # default
 ```
+
+### Page range — study a chapter without modifying the source
+
+```bash
+# Index only pages 1 to 50
+python main.py book.pdf --pages 1-50
+
+# A specific chapter with a better parser for formulas
+python main.py book.pdf --pages 100-200 --parser marker
+
+# Combine with --reindex to force re-extraction and re-indexing
+python main.py book.pdf --pages 1-50 --reindex
+```
+
+**How caching works with `--pages`:**
+
+| Run | What happens |
+|---|---|
+| First run with `--pages 1-50` | Extracts pages → `storage/pages/book_p1-50.pdf`, then parses and indexes |
+| Same range again | Skips extraction, loads the cached index instantly |
+| Different range `--pages 51-100` | New extracted file, new index — both coexist in cache |
+| `--pages 1-50 --reindex` | Re-extracts the PDF and rebuilds the index from scratch |
+
+The original PDF is never modified.
 
 ---
 
 ## Parsers
 
-Three parsers are available via `--parser`. The choice affects formula quality.
+Four parsers are available via `--parser`. The choice affects formula quality.
 **Re-indexing is required when switching parsers.**
 
 | Parser | `--parser` flag | Formula quality | Speed | Best for |
@@ -137,11 +166,14 @@ Three parsers are available via `--parser`. The choice affects formula quality.
 | **Docling** | `docling` (default) | Medium — detects formulas but some are dropped as `<!-- formula-not-decoded -->` | Slow | General PDFs, tables, scanned docs |
 | **PyMuPDF** | `pymupdf` | Low — extracts raw text, linearises 2D layout (fractions and subscripts may be garbled) | Fast | Simple text-heavy PDFs |
 | **marker-pdf** | `marker` | High — ML-based layout analysis, outputs proper LaTeX (`\frac`, `\sum`, etc.) | Slow on first run (downloads ~3.5 GB of models, then cached) | Academic/LaTeX-compiled PDFs with maths |
+| **MinerU** | `mineru` | High — VLM pipeline (MinerU2.5), Apache 2.0 licence | pipeline: moderate · vlm-engine / hybrid-engine: higher accuracy | Math-heavy books and papers; strong alternative to marker |
 
 ### Recommended for maths-heavy papers
 
 ```bash
 python main.py paper.pdf --parser marker --reindex
+# or
+python main.py paper.pdf --parser mineru --reindex
 ```
 
 ---
@@ -154,6 +186,7 @@ Once inside the chat session:
 |---|---|---|
 | `:help` | `:h` | Show the help panel |
 | `:sources` | `:s` | Show the retrieved passages used for the last answer |
+| `:latex` | `:l` | Toggle LaTeX rendering: unicode symbols (α β ∑) ↔ raw LaTeX code |
 | `:clear` | `:c` | Clear the terminal screen |
 | `:quit` | `:q`, `exit`, `quit` | Exit the chat |
 
@@ -188,6 +221,47 @@ $$MSE = \frac{1}{n}\sum_{i=1}^{n}(y_{\text{true}} - y_{\text{pred}})^2$$
 ```
 
 Greek letters (`α β γ θ σ ∇ ∈ ℝ`), operators (`∑ ∏ ∫`), and symbols (`× ÷ ≤ ≥`) render as Unicode. Subscripts and superscripts are approximated as `_` and `^`.
+
+Toggle rendering on/off at any time with `:latex` (or `:l`) to switch between unicode display and raw LaTeX code.
+
+---
+
+## Parser benchmark tool
+
+Before processing a large document, compare parsers on a representative sample to find the right speed/quality trade-off.
+
+```bash
+# Run all four parsers and compare
+python benchmark.py path/to/sample.pdf
+
+# Only specific parsers (skip slow ones)
+python benchmark.py sample.pdf --parsers docling pymupdf
+
+# Show 5 sample formulas per parser instead of 3
+python benchmark.py sample.pdf --sample 5
+
+# Extrapolate times to a 1200-page book instead of the default 800
+python benchmark.py sample.pdf --target-pages 1200
+
+# Save results as JSON for later comparison
+python benchmark.py sample.pdf --save results.json
+
+# Suppress the formula sample panels
+python benchmark.py sample.pdf --no-samples
+```
+
+**Output columns explained:**
+
+| Column | Meaning |
+|---|---|
+| Time (s) | Wall-clock seconds to parse the benchmark file |
+| Chars | Total characters extracted |
+| Formulas | Detected `$...$`, `$$...$$`, `\[...\]`, `\(...\)` environments |
+| LaTeX cmds | Occurrences of `\frac`, `\sum`, `\int`, etc. — proxy for formula richness |
+| Not decoded | Docling `<!-- formula-not-decoded -->` failures |
+| Est. 800p (min) | Extrapolated minutes for an 800-page document |
+
+The script ends with an automatic recommendation based on formula richness vs. speed.
 
 ---
 
@@ -226,7 +300,7 @@ pytest
 All tests are fully mocked — no Ollama server, no real PDF files, and no model downloads are needed to run the test suite.
 
 ```
-108 passed in ~8s
+149 passed in ~6s
 ```
 
 ---
@@ -236,6 +310,7 @@ All tests are fully mocked — no Ollama server, no real PDF files, and no model
 ```
 PDF-AI/
 ├── main.py                  # Entry point — CLI + pipeline wiring
+├── benchmark.py             # Parser benchmark CLI
 ├── check_index.py           # Index inspection CLI
 ├── .env                     # Local configuration (not committed)
 ├── requirements.txt
@@ -247,18 +322,21 @@ PDF-AI/
 │   │   ├── base.py          # Strategy interface (BasePDFParser)
 │   │   ├── docling_parser.py
 │   │   ├── pymupdf_parser.py
-│   │   └── marker_parser.py
+│   │   ├── marker_parser.py
+│   │   └── mineru_parser.py
 │   ├── indexing/
 │   │   └── indexer.py       # RAGIndexer — build/load vector store
 │   ├── rag/
 │   │   └── engine.py        # RAGEngine facade — retrieval + generation
 │   ├── chat/
-│   │   └── terminal.py      # Terminal REPL, LaTeX rendering
+│   │   └── terminal.py      # Terminal REPL, LaTeX rendering, :latex toggle
 │   └── inspection/
 │       └── inspector.py     # IndexInspector — reads docstore.json
 │
-├── tests/                   # pytest test suite (108 tests)
-└── storage/                 # Vector indexes (auto-generated, git-ignored)
+├── tests/                   # pytest test suite (149 tests)
+└── storage/                 # Auto-generated, git-ignored
+    ├── pages/               # Extracted page-range PDFs (--pages cache)
+    └── <name>_<hash>/       # Vector indexes per document
 ```
 
 ---
@@ -270,6 +348,7 @@ PDF-AI/
 | LLM inference | Ollama on `localhost` |
 | Embeddings | Ollama on `localhost` |
 | PDF parsing | Local process |
+| Page extraction | Local process (PyMuPDF) |
 | Vector storage | Local filesystem (`./storage/`) |
 | Model downloads | One-time, then `HF_HUB_OFFLINE=1` blocks further requests |
 

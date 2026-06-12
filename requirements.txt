@@ -12,6 +12,10 @@ docling>=2.0.0
 # PDF parsing (marker-pdf — ML-based, proper LaTeX formulas for academic PDFs)
 marker-pdf>=1.10.0
 
+# PDF parsing (MinerU — VLM-based, state-of-the-art formula extraction, Apache 2.0)
+# Apple Silicon: set MINERU_BACKEND=vlm-mlx-engine in .env for 100-200% speedup
+mineru[core]>=2.0.0
+
 # LaTeX → Unicode conversion for terminal display
 pylatexenc>=2.0
 

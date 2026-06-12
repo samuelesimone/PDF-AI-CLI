@@ -7,6 +7,7 @@ Everything else is treated as a question to the RAG engine.
 Commands:
   :help / :h       — show help
   :sources / :s    — print retrieved sources from the last answer
+  :latex / :l      — toggle LaTeX rendering (unicode ↔ raw LaTeX code)
   :clear / :c      — clear the terminal
   :quit / :q       — exit
 """
@@ -35,6 +36,7 @@ _HELP_MD = """\
 |---------|-------------|
 | `:help` `:h` | Show this help |
 | `:sources` `:s` | Show retrieved passages from the last answer |
+| `:latex` `:l` | Toggle LaTeX rendering: unicode symbols ↔ raw LaTeX code |
 | `:clear` `:c` | Clear the screen |
 | `:quit` `:q` | Exit |
 
@@ -48,6 +50,7 @@ _HELP_MD = """\
 - Ask about any topic, formula, or concept in your PDF.
 - Follow up with `:sources` to see exactly which passages were used.
 - Use `--top-k N` when launching to retrieve more context.
+- Use `:latex` to switch between rendered unicode (α β ∑) and raw LaTeX ($\\alpha$ $\\sum$).
 """
 
 # Keywords that signal an explanation request → explain mode.
@@ -138,6 +141,7 @@ class _CommandHandler:
         self._dispatch = {
             frozenset([":help", ":h"]): self._help,
             frozenset([":sources", ":s"]): self._sources,
+            frozenset([":latex", ":l"]): self._latex,
             frozenset([":clear", ":c"]): self._clear,
             frozenset([":quit", ":q", "exit", "quit"]): self._quit,
         }
@@ -157,6 +161,13 @@ class _CommandHandler:
     def _sources(self) -> None:
         self._chat._print_sources(self._chat._last_result)
 
+    def _latex(self) -> None:
+        self._chat._latex_render = not self._chat._latex_render
+        if self._chat._latex_render:
+            console.print("[green]LaTeX rendering ON[/green]  — formulas shown as unicode (α β ∑ ∫)")
+        else:
+            console.print("[yellow]LaTeX rendering OFF[/yellow] — formulas shown as raw LaTeX ($\\alpha$ $\\sum$)")
+
     def _clear(self) -> None:
         console.clear()
 
@@ -175,9 +186,14 @@ class TerminalChat:
         self.engine = engine
         self.pdf_path = pdf_path
         self._last_result: Optional[QueryResult] = None
+        self._latex_render: bool = True   # True = unicode, False = raw LaTeX
         self._commands = _CommandHandler(self)
 
     # ── Rendering helpers ──────────────────────────────────────────────────
+
+    def _apply_latex(self, text: str) -> str:
+        """Apply LaTeX → unicode conversion only when rendering is enabled."""
+        return _render_latex(text) if self._latex_render else text
 
     def _print_welcome(self) -> None:
         console.print(
@@ -207,7 +223,7 @@ class TerminalChat:
         if result.thinking:
             console.print(
                 Panel(
-                    _render_latex(result.thinking),
+                    self._apply_latex(result.thinking),
                     title=f"[dim]Reasoning (qwen3 thinking mode)[/dim]  {timing}",
                     border_style="dim",
                     style="dim",
@@ -216,7 +232,7 @@ class TerminalChat:
             )
         console.print(
             Panel(
-                Markdown(_render_latex(result.answer)),
+                Markdown(self._apply_latex(result.answer)),
                 title=f"[bold blue]Answer[/bold blue]{mode_badge}  {timing}",
                 border_style="blue",
                 padding=(1, 2),
