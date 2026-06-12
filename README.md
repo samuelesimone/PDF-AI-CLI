@@ -93,6 +93,7 @@ Copy the table below into your `.env` and adjust as needed.
 | `HF_HUB_OFFLINE` | `1` | Block outbound HuggingFace requests |
 | `ENABLE_THINKING` | `false` | Enable qwen3 extended reasoning by default |
 | `MINERU_BACKEND` | `pipeline` | MinerU backend: `pipeline` (default), `vlm-engine`, `hybrid-engine` |
+| `VISION_MODEL` | *(empty)* | Ollama VLM for figure analysis (e.g. `qwen3-vl:8b`). Empty = disabled |
 
 > **Important:** Changing `EMBED_MODEL` invalidates all cached indexes.
 > Run with `--reindex` after switching embedding models.
@@ -206,6 +207,62 @@ python main.py paper.pdf --parser marker --reindex
 # or
 python main.py paper.pdf --parser mineru --reindex
 ```
+
+---
+
+## Figure analysis
+
+PDF-AI can extract every figure (charts, plots, diagrams, photographs) from the document, describe each one using a local vision model, and index those descriptions alongside the text.  When you then ask about a figure, the RAG engine retrieves the description and answers from it.
+
+### Setup
+
+```bash
+# Pull the recommended vision model
+ollama pull qwen3-vl:8b
+
+# Add to .env
+VISION_MODEL=qwen3-vl:8b
+```
+
+### How it works
+
+1. **Vector figures** — PyMuPDF `cluster_drawings()` groups PDF drawing commands (matplotlib, pgfplots, TikZ, etc.) into bounding boxes and renders each one to PNG at 150 DPI.
+2. **Raster images** — embedded photos and scanned figures are extracted directly via `get_images()`. Images already covered by a vector region are deduplicated.
+3. **VLM description** — each figure PNG is sent to the Ollama `/api/chat` endpoint.  The model is asked to describe the figure type, axes, legends, trends, and key findings.
+4. **Indexed** — the descriptions are stored in the same vector index as the text, so they are retrieved like any other passage.
+
+Figure analysis runs **once** when the index is first built and the result is cached.  Subsequent runs load the cached index (with descriptions already in it) instantly.
+
+### Command-line usage
+
+```bash
+# Enable for this session (overrides .env)
+python main.py paper.pdf --vision-model qwen3-vl:8b
+
+# Skip figure analysis even if VISION_MODEL is set in .env
+python main.py paper.pdf --no-figures
+
+# Re-analyze figures along with re-indexing the text
+python main.py paper.pdf --reindex --vision-model qwen3-vl:8b
+```
+
+The web UI supports the same flags:
+
+```bash
+python web_ui.py paper.pdf --vision-model qwen3-vl:8b
+```
+
+### Supported vision models (via Ollama)
+
+| Model | `ollama pull` tag | VRAM (Q4) | DocVQA | Notes |
+|---|---|---|---|---|
+| **Qwen3-VL 8B** | `qwen3-vl:8b` | ~6 GB | 96.1% | Recommended — best quality under 10B |
+| Qwen3-VL 4B | `qwen3-vl:4b` | ~3.5 GB | 94.2% | Good for machines with 8 GB VRAM |
+| Qwen2.5-VL 7B | `qwen2.5vl:7b` | ~6 GB | 95.7% | Strong alternative; very high ChartQA |
+| Llama 3.2 Vision 11B | `llama3.2-vision:11b` | ~8 GB | 88.4% | Excellent on science diagrams (AI2D 91%) |
+| Moondream2 | `moondream` | ~2 GB | — | Very lightweight; basic descriptions only |
+
+> **Note:** Figure analysis adds significant time when first building an index (~10–30 s per figure depending on the model and hardware). The result is cached — subsequent runs are instant.
 
 ---
 
@@ -362,6 +419,9 @@ PDF-AI/
 │   │   └── engine.py        # RAGEngine facade — retrieval + generation
 │   ├── chat/
 │   │   └── terminal.py      # Terminal REPL, LaTeX rendering, :latex toggle
+│   ├── figures/
+│   │   ├── extractor.py     # FigureExtractor — PyMuPDF cluster_drawings + get_images
+│   │   └── analyzer.py      # FigureAnalyzer — Ollama VLM descriptions
 │   ├── web/
 │   │   └── index.html       # Single-page web UI (KaTeX + marked.js)
 │   └── inspection/

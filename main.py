@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
+from typing import Optional
 
 # Load .env before any library imports so HF_HUB_OFFLINE takes effect
 from dotenv import load_dotenv
@@ -86,7 +88,34 @@ def _parse_args() -> argparse.Namespace:
             "with the same range reuse it without re-extracting."
         ),
     )
+    p.add_argument(
+        "--vision-model",
+        default=None,
+        metavar="NAME",
+        help=(
+            "Ollama vision model for figure analysis (e.g. qwen3-vl:8b). "
+            "Overrides VISION_MODEL from .env. "
+            "Figures are extracted and described automatically when building a new index."
+        ),
+    )
+    p.add_argument(
+        "--no-figures",
+        action="store_true",
+        help="Skip figure analysis even if VISION_MODEL is configured in .env.",
+    )
     return p.parse_args()
+
+
+def _get_page_count(pdf_path: Path) -> Optional[int]:
+    """Return the PDF page count via PyMuPDF, or None if unavailable."""
+    try:
+        import fitz
+        doc = fitz.open(str(pdf_path))
+        n = len(doc)
+        doc.close()
+        return n
+    except Exception:
+        return None
 
 
 def _check_pdf(pdf_path: Path) -> None:
@@ -180,6 +209,10 @@ def main() -> None:
         config.similarity_top_k = args.top_k
     if args.thinking:
         config.enable_thinking = True
+    if args.vision_model:
+        config.vision_model = args.vision_model
+    if args.no_figures:
+        config.vision_model = ""
 
     # ── Page range extraction ────────────────────────────────────────────────
     if args.pages:
@@ -215,19 +248,110 @@ def main() -> None:
         indexer.drop_index(pdf_path)
         console.print("[yellow]Existing index removed — re-indexing from scratch.[/yellow]")
 
-    # ── Index ────────────────────────────────────────────────────────────────
-    if indexer.is_indexed(pdf_path):
-        console.print(
-            f"[green]Loading cached index[/green] for [cyan]{pdf_path.name}[/cyan]…"
-        )
-    else:
-        console.print(
-            f"[green]Parsing & indexing[/green] [cyan]{pdf_path.name}[/cyan]…\n"
-            "[dim]This may take a minute for large PDFs — result will be cached.[/dim]"
+    # ── Figure analysis (runs only when building a new index) ────────────────
+    figure_docs = []
+    if config.vision_model and not indexer.is_indexed(pdf_path):
+        from src.figures import FigureAnalyzer, extract_figures
+        from rich.progress import (
+            BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn,
         )
 
-    with console.status("[bold cyan]Working…[/bold cyan]", spinner="dots"):
-        index = indexer.build_or_load(pdf_path)
+        console.print(f"[dim]Scanning for figures…[/dim]")
+        figures = extract_figures(pdf_path)
+
+        if figures:
+            console.print(
+                f"[dim]Found [/dim][cyan]{len(figures)}[/cyan][dim] figure(s) — "
+                f"analyzing with [/dim][cyan]{config.vision_model}[/cyan]"
+            )
+            analyzer = FigureAnalyzer(
+                model=config.vision_model,
+                base_url=config.ollama_base_url,
+                timeout=config.request_timeout,
+            )
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[cyan]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                console=console,
+                transient=True,
+            ) as progress:
+                task_id = progress.add_task("Analyzing figures", total=len(figures))
+
+                def _on_progress(current: int, total: int, page: int) -> None:
+                    progress.update(
+                        task_id, completed=current,
+                        description=f"Analyzing figures  [dim][page {page}][/dim]",
+                    )
+
+                figure_docs = analyzer.analyze_all(
+                    figures, pdf_path, progress_callback=_on_progress,
+                )
+
+            n_ok = len(figure_docs)
+            n_fail = len(figures) - n_ok
+            summary = f"[green]✓[/green] [dim]{n_ok} figure description(s) added to index"
+            if n_fail:
+                summary += f" · {n_fail} skipped"
+            console.print(summary + "[/dim]")
+        else:
+            console.print("[dim]No figures detected in this PDF.[/dim]")
+
+    # ── Index ────────────────────────────────────────────────────────────────
+    from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+    _prog_cols = (
+        SpinnerColumn(),
+        TextColumn("[cyan]{task.description}"),
+        TimeElapsedColumn(),
+    )
+
+    if indexer.is_indexed(pdf_path):
+        t0 = time.perf_counter()
+        with console.status("[bold cyan]Loading cached index…[/bold cyan]", spinner="dots"):
+            index = indexer.load_index(pdf_path)
+        console.print(
+            f"[bold green]✓ Cached index loaded[/bold green] "
+            f"[dim]({time.perf_counter() - t0:.1f}s)[/dim]"
+        )
+    else:
+        page_count = _get_page_count(pdf_path)
+        if page_count:
+            console.print(
+                f"[dim]Building index for the first time — "
+                f"{page_count} page(s), result will be cached.[/dim]"
+            )
+
+        # Step 1: Parse text
+        parse_s: float = 0.0
+        with Progress(*_prog_cols, console=console) as prog:
+            prog.add_task(f"Parsing with {args.parser}…", total=None)
+            t0 = time.perf_counter()
+            parsed = parser.parse(pdf_path)
+            parse_s = time.perf_counter() - t0
+
+        all_docs = list(parsed) + figure_docs
+        fig_note = (
+            f" + {len(figure_docs)} figure description(s)" if figure_docs else ""
+        )
+        console.print(
+            f"[green]✓[/green] [dim]Parsed {len(parsed)} text chunk(s)"
+            f"{fig_note} · {parse_s:.1f}s[/dim]"
+        )
+
+        # Step 2: Embed chunks and build the vector index
+        embed_s: float = 0.0
+        with Progress(*_prog_cols, console=console) as prog:
+            prog.add_task(f"Embedding {len(all_docs)} chunk(s)…", total=None)
+            t1 = time.perf_counter()
+            index = indexer.index_documents(pdf_path, all_docs)
+            embed_s = time.perf_counter() - t1
+
+        console.print(
+            f"[green]✓[/green] [dim]Indexed · {embed_s:.1f}s "
+            f"· total {parse_s + embed_s:.1f}s[/dim]"
+        )
 
     console.print("[bold green]✓ Index ready.[/bold green]")
 

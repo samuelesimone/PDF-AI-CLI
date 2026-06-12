@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from llama_index.core import (
     Document,
@@ -81,25 +81,58 @@ class RAGIndexer:
         if idx.exists():
             shutil.rmtree(idx)
 
-    # ── main entry point ─────────────────────────────────────────────────────
+    # ── main entry points ────────────────────────────────────────────────────
 
-    def build_or_load(self, pdf_path: Path) -> VectorStoreIndex:
-        """Return an index for *pdf_path*, building it first if necessary."""
+    def load_index(self, pdf_path: Path) -> VectorStoreIndex:
+        """Load a previously persisted index from disk."""
         idx_dir = self.index_path(pdf_path)
+        storage_context = StorageContext.from_defaults(persist_dir=str(idx_dir))
+        return load_index_from_storage(storage_context)
 
-        if self.is_indexed(pdf_path):
-            storage_context = StorageContext.from_defaults(persist_dir=str(idx_dir))
-            return load_index_from_storage(storage_context)
+    def index_documents(
+        self,
+        pdf_path: Path,
+        parsed_docs: List,
+    ) -> VectorStoreIndex:
+        """Embed *parsed_docs* and persist a new vector index for *pdf_path*.
 
-        # Parse → Document objects → index
-        parsed = self.parser.parse(pdf_path)
+        Args:
+            pdf_path:    Path to the source PDF (used to derive the storage key).
+            parsed_docs: List of :class:`~src.parsers.base.ParsedDocument` objects
+                to embed.  This can include text chunks, figure descriptions, or
+                any other pre-parsed content.
+        """
+        idx_dir = self.index_path(pdf_path)
         documents: List[Document] = [
-            Document(text=p.text, metadata=p.metadata) for p in parsed
+            Document(text=p.text, metadata=p.metadata) for p in parsed_docs
         ]
-
         index = VectorStoreIndex.from_documents(documents)
-
         idx_dir.mkdir(parents=True, exist_ok=True)
         index.storage_context.persist(persist_dir=str(idx_dir))
-
         return index
+
+    def build_or_load(
+        self,
+        pdf_path: Path,
+        extra_docs: Optional[List] = None,
+    ) -> VectorStoreIndex:
+        """Return an index for *pdf_path*, building it first if necessary.
+
+        This is a convenience wrapper used by callers that do not need per-step
+        progress reporting.  For interactive use with progress feedback, call
+        :meth:`load_index` or :meth:`index_documents` directly.
+
+        Args:
+            pdf_path:   Path to the PDF file.
+            extra_docs: Optional additional :class:`~src.parsers.base.ParsedDocument`
+                objects (e.g. figure descriptions from FigureAnalyzer) to
+                include when building the index.  Ignored when loading a
+                cached index.
+        """
+        if self.is_indexed(pdf_path):
+            return self.load_index(pdf_path)
+
+        parsed = list(self.parser.parse(pdf_path))
+        if extra_docs:
+            parsed.extend(extra_docs)
+        return self.index_documents(pdf_path, parsed)

@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+import time
 import webbrowser
 from pathlib import Path
 from typing import List, Optional
@@ -143,6 +144,10 @@ def _parse_args() -> argparse.Namespace:
                    help="PDF parser to use (default: docling)")
     p.add_argument("--pages", default=None, metavar="START-END",
                    help="Page range to extract before parsing, e.g. '1-50'")
+    p.add_argument("--vision-model", default=None, metavar="NAME",
+                   help="Ollama vision model for figure analysis (e.g. qwen3-vl:8b)")
+    p.add_argument("--no-figures", action="store_true",
+                   help="Skip figure analysis even if VISION_MODEL is set in .env")
     p.add_argument("--port", type=int, default=7860, metavar="PORT",
                    help="Port to serve the web UI on (default: 7860)")
     p.add_argument("--no-browser", action="store_true",
@@ -175,6 +180,10 @@ def main() -> None:
         config.similarity_top_k = args.top_k
     if args.thinking:
         config.enable_thinking = True
+    if args.vision_model:
+        config.vision_model = args.vision_model
+    if args.no_figures:
+        config.vision_model = ""
 
     # ── Page range extraction ──────────────────────────────────────────────────
     if args.pages:
@@ -202,13 +211,58 @@ def main() -> None:
         indexer.drop_index(pdf_path)
         print("Existing index removed — re-indexing from scratch.")
 
-    if indexer.is_indexed(pdf_path):
-        print(f"Loading cached index for {pdf_path.name}…")
-    else:
-        print(f"Parsing & indexing {pdf_path.name}…")
-        print("This may take a minute for large PDFs — result will be cached.")
+    # ── Figure analysis (only when building a new index) ──────────────────────
+    figure_docs = []
+    if config.vision_model and not indexer.is_indexed(pdf_path):
+        from src.figures import FigureAnalyzer, extract_figures
 
-    index = indexer.build_or_load(pdf_path)
+        print("Scanning for figures…")
+        figures = extract_figures(pdf_path)
+        if figures:
+            print(f"Found {len(figures)} figure(s) — analyzing with {config.vision_model}…")
+            analyzer = FigureAnalyzer(
+                model=config.vision_model,
+                base_url=config.ollama_base_url,
+                timeout=config.request_timeout,
+            )
+
+            def _web_progress(current: int, total: int, page: int) -> None:
+                print(f"  Figure {current + 1}/{total} (page {page})…", end="\r", flush=True)
+
+            figure_docs = analyzer.analyze_all(figures, pdf_path, progress_callback=_web_progress)
+            print(f"\n✓ {len(figure_docs)} figure description(s) added.")
+        else:
+            print("No figures detected.")
+
+    if indexer.is_indexed(pdf_path):
+        t0 = time.perf_counter()
+        print(f"Loading cached index for {pdf_path.name}…", end=" ", flush=True)
+        index = indexer.load_index(pdf_path)
+        print(f"done ({time.perf_counter() - t0:.1f}s)")
+    else:
+        try:
+            import fitz
+            doc = fitz.open(str(pdf_path))
+            n_pages = len(doc)
+            doc.close()
+            print(f"Building index for the first time — {n_pages} page(s), result will be cached.")
+        except Exception:
+            print(f"Parsing & indexing {pdf_path.name} — result will be cached.")
+
+        print(f"Parsing with {args.parser}…", end=" ", flush=True)
+        t0 = time.perf_counter()
+        parsed = list(parser.parse(pdf_path))
+        parse_s = time.perf_counter() - t0
+        all_docs = parsed + figure_docs
+        fig_note = f" + {len(figure_docs)} figure description(s)" if figure_docs else ""
+        print(f"done — {len(parsed)} chunk(s){fig_note} ({parse_s:.1f}s)")
+
+        print(f"Embedding {len(all_docs)} chunk(s)…", end=" ", flush=True)
+        t1 = time.perf_counter()
+        index = indexer.index_documents(pdf_path, all_docs)
+        embed_s = time.perf_counter() - t1
+        print(f"done ({embed_s:.1f}s · total {parse_s + embed_s:.1f}s)")
+
     print("Index ready.\n")
 
     _engine = RAGEngine(index=index, config=config)
@@ -223,7 +277,7 @@ def main() -> None:
     if not args.no_browser:
         webbrowser.open(url)
 
-    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="warning")
+    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":

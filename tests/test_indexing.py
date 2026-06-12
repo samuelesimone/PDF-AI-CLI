@@ -85,6 +85,98 @@ class TestRAGIndexerDropIndex:
         indexer.drop_index(pdf)
 
 
+class TestRAGIndexerLoadIndex:
+    @patch("src.indexing.indexer.StorageContext")
+    @patch("src.indexing.indexer.load_index_from_storage")
+    def test_returns_loaded_index(self, mock_load, mock_sc, config, tmp_path):
+        indexer, _ = _make_indexer(config)
+        pdf = tmp_path / "book.pdf"
+        mock_load.return_value = MagicMock()
+
+        result = indexer.load_index(pdf)
+
+        mock_load.assert_called_once()
+        assert result is mock_load.return_value
+
+    @patch("src.indexing.indexer.StorageContext")
+    @patch("src.indexing.indexer.load_index_from_storage")
+    def test_uses_correct_persist_dir(self, mock_load, mock_sc, config, tmp_path):
+        indexer, _ = _make_indexer(config)
+        pdf = tmp_path / "book.pdf"
+        mock_load.return_value = MagicMock()
+
+        indexer.load_index(pdf)
+
+        expected_dir = str(indexer.index_path(pdf))
+        mock_sc.from_defaults.assert_called_once_with(persist_dir=expected_dir)
+
+
+class TestRAGIndexerIndexDocuments:
+    @patch("src.indexing.indexer.VectorStoreIndex")
+    def test_returns_index(self, mock_vi_cls, config, tmp_path):
+        indexer, _ = _make_indexer(config)
+        pdf = tmp_path / "book.pdf"
+        pdf.touch()
+
+        docs = [ParsedDocument(text="chunk", metadata={"doc_id": "book.pdf"})]
+        mock_index = MagicMock()
+        mock_vi_cls.from_documents.return_value = mock_index
+
+        result = indexer.index_documents(pdf, docs)
+
+        mock_vi_cls.from_documents.assert_called_once()
+        assert result is mock_index
+
+    @patch("src.indexing.indexer.VectorStoreIndex")
+    def test_persists_to_correct_dir(self, mock_vi_cls, config, tmp_path):
+        indexer, _ = _make_indexer(config)
+        pdf = tmp_path / "book.pdf"
+        pdf.touch()
+
+        mock_index = MagicMock()
+        mock_vi_cls.from_documents.return_value = mock_index
+
+        indexer.index_documents(pdf, [ParsedDocument(text="x", metadata={})])
+
+        expected_dir = str(indexer.index_path(pdf))
+        mock_index.storage_context.persist.assert_called_once_with(
+            persist_dir=expected_dir
+        )
+
+    @patch("src.indexing.indexer.VectorStoreIndex")
+    def test_converts_parsed_docs_to_documents(self, mock_vi_cls, config, tmp_path):
+        indexer, _ = _make_indexer(config)
+        pdf = tmp_path / "book.pdf"
+        pdf.touch()
+
+        mock_index = MagicMock()
+        mock_vi_cls.from_documents.return_value = mock_index
+
+        docs = [
+            ParsedDocument(text="first", metadata={"page": 1}),
+            ParsedDocument(text="second", metadata={"page": 2}),
+        ]
+        indexer.index_documents(pdf, docs)
+
+        call_args = mock_vi_cls.from_documents.call_args[0][0]
+        assert len(call_args) == 2
+        assert call_args[0].text == "first"
+        assert call_args[1].text == "second"
+
+    @patch("src.indexing.indexer.VectorStoreIndex")
+    def test_creates_index_directory(self, mock_vi_cls, config, tmp_path):
+        indexer, _ = _make_indexer(config)
+        pdf = tmp_path / "book.pdf"
+        pdf.touch()
+
+        mock_index = MagicMock()
+        mock_vi_cls.from_documents.return_value = mock_index
+
+        indexer.index_documents(pdf, [ParsedDocument(text="x", metadata={})])
+
+        assert indexer.index_path(pdf).exists()
+
+
 class TestRAGIndexerBuildOrLoad:
     @patch("src.indexing.indexer.StorageContext")
     @patch("src.indexing.indexer.load_index_from_storage")

@@ -34,6 +34,9 @@ class Config:
     # ── qwen3 thinking mode (set True to enable extended reasoning) ──────────
     enable_thinking: bool = False
 
+    # ── Figure analysis (optional — empty string disables it) ─────────────
+    vision_model: str = ""   # e.g. "qwen3-vl:8b"; set via VISION_MODEL in .env
+
     @classmethod
     def from_env(cls) -> Config:
         """Create a Config whose defaults are overridden by env vars."""
@@ -48,4 +51,5 @@ class Config:
             similarity_top_k=int(os.getenv("SIMILARITY_TOP_K", "5")),
             storage_dir=Path(os.getenv("STORAGE_DIR", "./storage")),
             enable_thinking=os.getenv("ENABLE_THINKING", "false").lower() == "true",
+            vision_model=os.getenv("VISION_MODEL", ""),
         )
