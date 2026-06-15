@@ -8,6 +8,7 @@ Commands:
   :help / :h       — show help
   :sources / :s    — print retrieved sources from the last answer
   :latex / :l      — toggle LaTeX rendering (unicode ↔ raw LaTeX code)
+  :study / :st     — toggle study mode (Socratic tutor with [doc]/[model] tagging)
   :clear / :c      — clear the terminal
   :quit / :q       — exit
 """
@@ -37,14 +38,23 @@ _HELP_MD = """\
 | `:help` `:h` | Show this help |
 | `:sources` `:s` | Show retrieved passages from the last answer |
 | `:latex` `:l` | Toggle LaTeX rendering: unicode symbols ↔ raw LaTeX code |
+| `:study` `:st` | Toggle study mode (Socratic tutor — active recall + source tagging) |
+| `:reset` `:r` | Start a new conversation (clears session history) |
 | `:clear` `:c` | Clear the screen |
 | `:quit` `:q` | Exit |
 
-**Query modes** (chosen automatically)
-| Mode | When | Behaviour |
-|------|------|-----------|
-| `strict` | Factual questions | Answers only from retrieved passages |
-| `explain` | "Explain…", "How does…", "Derive…", … | Passages provide context; general math knowledge fills in derivations and intuition |
+**Query modes**
+| Mode | Activated by | Behaviour |
+|------|-------------|-----------|
+| `strict` | Auto-detected (factual questions) | Answers only from retrieved passages |
+| `explain` | Auto-detected ("Explain…", "How does…", "Derive…") | Passages anchor context; general math knowledge fills derivations |
+| `study` | `:study` toggle | Socratic tutor: asks before telling, tags every claim `[doc]` or `[model]`, applies Feynman checks, elaborative interrogation, and Bloom's taxonomy progression |
+
+**Study mode tips**
+- Type `:study` to enter/exit study mode.
+- The tutor will ask you to attempt an answer before explaining — this is intentional (active recall).
+- Every factual claim is tagged `[doc]` (from your PDF) or `[model]` (general knowledge).
+- Type `summary` or `done` at the end of a session for a recap and spaced-review plan.
 
 **Tips**
 - Ask about any topic, formula, or concept in your PDF.
@@ -142,6 +152,8 @@ class _CommandHandler:
             frozenset([":help", ":h"]): self._help,
             frozenset([":sources", ":s"]): self._sources,
             frozenset([":latex", ":l"]): self._latex,
+            frozenset([":study", ":st"]): self._study,
+            frozenset([":reset", ":r"]): self._reset,
             frozenset([":clear", ":c"]): self._clear,
             frozenset([":quit", ":q", "exit", "quit"]): self._quit,
         }
@@ -168,6 +180,29 @@ class _CommandHandler:
         else:
             console.print("[yellow]LaTeX rendering OFF[/yellow] — formulas shown as raw LaTeX ($\\alpha$ $\\sum$)")
 
+    def _study(self) -> None:
+        self._chat._study_mode = not self._chat._study_mode
+        if self._chat._study_mode:
+            console.print(
+                Panel(
+                    "[bold green]Study mode ON[/bold green]\n\n"
+                    "The tutor will ask you to attempt an answer before explaining.\n"
+                    "Every claim is tagged [bold cyan][doc][/bold cyan] (your PDF) "
+                    "or [bold yellow][model][/bold yellow] (general knowledge).\n\n"
+                    "Type [yellow]summary[/yellow] or [yellow]done[/yellow] at any point "
+                    "for a session recap and spaced-review plan.\n"
+                    "Type [yellow]:study[/yellow] again to exit study mode.",
+                    border_style="green",
+                    padding=(1, 2),
+                )
+            )
+        else:
+            console.print("[yellow]Study mode OFF[/yellow] — back to normal chat.")
+
+    def _reset(self) -> None:
+        self._chat.engine.reset_history()
+        console.print("[yellow]Conversation reset.[/yellow] Starting a fresh session.")
+
     def _clear(self) -> None:
         console.clear()
 
@@ -187,6 +222,7 @@ class TerminalChat:
         self.pdf_path = pdf_path
         self._last_result: Optional[QueryResult] = None
         self._latex_render: bool = True   # True = unicode, False = raw LaTeX
+        self._study_mode: bool = False    # True = Socratic tutor mode
         self._commands = _CommandHandler(self)
 
     # ── Rendering helpers ──────────────────────────────────────────────────
@@ -215,7 +251,9 @@ class TerminalChat:
             f"generate {result.generate_s:.1f}s  ·  "
             f"total {total_s:.1f}s[/dim]"
         )
-        if result.mode == "explain":
+        if result.mode == "study":
+            mode_badge = "  [bold green]study mode[/bold green]"
+        elif result.mode == "explain":
             mode_badge = "  [bold yellow]explain mode[/bold yellow]"
         else:
             mode_badge = "  [dim]strict mode[/dim]"
@@ -294,15 +332,24 @@ class TerminalChat:
                 )
                 continue
 
-            # RAG query — auto-detect explain vs strict mode
-            mode = _detect_mode(user_input)
-            spinner_label = (
-                "[bold yellow]Explaining…[/bold yellow]"
-                if mode == "explain"
-                else "[bold cyan]Thinking…[/bold cyan]"
-            )
+            # RAG query — study mode overrides auto-detection
+            if self._study_mode:
+                mode = "study"
+                spinner_label = "[bold green]Studying…[/bold green]"
+            else:
+                mode = _detect_mode(user_input)
+                spinner_label = (
+                    "[bold yellow]Explaining…[/bold yellow]"
+                    if mode == "explain"
+                    else "[bold cyan]Thinking…[/bold cyan]"
+                )
             with console.status(spinner_label, spinner="dots"):
                 result = self.engine.query(user_input, mode=mode)
 
             self._last_result = result
+            if result.compacted:
+                console.print(
+                    "[dim]  ↩ Context compacted — older turns summarised locally "
+                    "to stay within the model's context window.[/dim]"
+                )
             self._print_answer(result)

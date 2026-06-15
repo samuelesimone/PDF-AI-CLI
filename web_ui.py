@@ -43,6 +43,7 @@ _HTML_PATH = Path(__file__).parent / "src" / "web" / "index.html"
 
 class ChatRequest(BaseModel):
     question: str
+    study_mode: bool = False
 
 
 class SourceItem(BaseModel):
@@ -59,6 +60,7 @@ class ChatResponse(BaseModel):
     generate_s: float
     total_s: float
     sources: List[SourceItem]
+    compacted: bool = False
 
 
 # ── FastAPI app ────────────────────────────────────────────────────────────────
@@ -69,6 +71,14 @@ app = FastAPI(title="PDF-AI", docs_url=None, redoc_url=None)
 @app.get("/")
 async def index():
     return FileResponse(_HTML_PATH)
+
+
+@app.post("/reset")
+async def reset():
+    """Clear the engine's conversation history for a fresh session."""
+    if _engine is not None:
+        _engine.reset_history()
+    return {"status": "ok"}
 
 
 @app.get("/info")
@@ -91,7 +101,7 @@ async def chat(req: ChatRequest):
 
     from src.chat.terminal import _detect_mode
 
-    mode = _detect_mode(question)
+    mode = "study" if req.study_mode else _detect_mode(question)
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(None, _engine.query, question, mode)
@@ -115,6 +125,7 @@ async def chat(req: ChatRequest):
         generate_s=round(result.generate_s, 2),
         total_s=round(result.retrieve_s + result.generate_s, 2),
         sources=sources,
+        compacted=result.compacted,
     )
 
 

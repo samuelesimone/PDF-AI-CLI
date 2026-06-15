@@ -112,32 +112,36 @@ class TestRAGEngine:
         mock_explain_synth = MagicMock()
         mock_explain_synth.synthesize.return_value = mock_response
 
+        mock_study_synth = MagicMock()
+        mock_study_synth.synthesize.return_value = mock_response
+
         mock_index = MagicMock()
-        # get_response_synthesizer is called twice (strict + explain); return both mocks
+        # get_response_synthesizer is called three times (strict + explain + study)
         with patch("src.rag.engine.RetrieverQueryEngine"), \
              patch("src.rag.engine.get_response_synthesizer",
-                   side_effect=[mock_strict_synth, mock_explain_synth]), \
+                   side_effect=[mock_strict_synth, mock_explain_synth, mock_study_synth]), \
              patch.object(mock_index, "as_retriever", return_value=mock_retriever):
             engine = RAGEngine(index=mock_index, config=config)
 
         engine._retriever = mock_retriever
         engine._strict_synthesizer = mock_strict_synth
         engine._explain_synthesizer = mock_explain_synth
+        engine._study_synthesizer = mock_study_synth
         engine._synthesizer = mock_strict_synth
-        return engine, mock_retriever, mock_strict_synth, mock_explain_synth
+        return engine, mock_retriever, mock_strict_synth, mock_explain_synth, mock_study_synth
 
     def test_query_returns_query_result(self, config):
-        engine, _, _, _ = self._make_engine(config)
+        engine, *_ = self._make_engine(config)
         result = engine.query("What is gravity?")
         assert isinstance(result, QueryResult)
 
     def test_answer_text_is_preserved(self, config):
-        engine, _, _, _ = self._make_engine(config, answer_text="Gravity is a force.")
+        engine, *_ = self._make_engine(config, answer_text="Gravity is a force.")
         result = engine.query("What is gravity?")
         assert result.answer == "Gravity is a force."
 
     def test_thinking_separated_from_answer(self, config):
-        engine, _, _, _ = self._make_engine(
+        engine, *_ = self._make_engine(
             config, answer_text="<think>hmm</think>Gravity is a force."
         )
         result = engine.query("What is gravity?")
@@ -146,12 +150,12 @@ class TestRAGEngine:
         assert result.thinking == "hmm"
 
     def test_thinking_is_none_when_no_block(self, config):
-        engine, _, _, _ = self._make_engine(config, answer_text="Gravity is a force.")
+        engine, *_ = self._make_engine(config, answer_text="Gravity is a force.")
         result = engine.query("What is gravity?")
         assert result.thinking is None
 
     def test_empty_sources_when_no_nodes(self, config):
-        engine, _, _, _ = self._make_engine(config, source_nodes=[])
+        engine, *_ = self._make_engine(config, source_nodes=[])
         result = engine.query("test")
         assert result.sources == []
 
@@ -161,7 +165,7 @@ class TestRAGEngine:
         mock_node.node.metadata = {"page": 12}
         mock_node.score = 0.87
 
-        engine, _, _, _ = self._make_engine(config, source_nodes=[mock_node])
+        engine, *_ = self._make_engine(config, source_nodes=[mock_node])
         result = engine.query("test")
 
         assert len(result.sources) == 1
@@ -171,35 +175,48 @@ class TestRAGEngine:
         assert abs(src.score - 0.87) < 1e-6
 
     def test_retriever_called_with_question(self, config):
-        engine, mock_retriever, _, _ = self._make_engine(config)
+        engine, mock_retriever, *_ = self._make_engine(config)
         engine.query("Explain entropy.")
         mock_retriever.retrieve.assert_called_once_with("Explain entropy.")
 
     def test_strict_mode_uses_strict_synthesizer(self, config):
         mock_node = MagicMock()
-        engine, _, mock_strict, mock_explain = self._make_engine(
+        engine, _, mock_strict, mock_explain, mock_study = self._make_engine(
             config, source_nodes=[mock_node]
         )
         engine.query("What is the accuracy?", mode="strict")
         mock_strict.synthesize.assert_called_once()
         mock_explain.synthesize.assert_not_called()
+        mock_study.synthesize.assert_not_called()
 
     def test_explain_mode_uses_explain_synthesizer(self, config):
         mock_node = MagicMock()
-        engine, _, mock_strict, mock_explain = self._make_engine(
+        engine, _, mock_strict, mock_explain, mock_study = self._make_engine(
             config, source_nodes=[mock_node]
         )
         engine.query("Explain the MSE formula.", mode="explain")
         mock_explain.synthesize.assert_called_once()
         mock_strict.synthesize.assert_not_called()
+        mock_study.synthesize.assert_not_called()
+
+    def test_study_mode_uses_study_synthesizer(self, config):
+        mock_node = MagicMock()
+        engine, _, mock_strict, mock_explain, mock_study = self._make_engine(
+            config, source_nodes=[mock_node]
+        )
+        engine.query("What is the loss function?", mode="study")
+        mock_study.synthesize.assert_called_once()
+        mock_strict.synthesize.assert_not_called()
+        mock_explain.synthesize.assert_not_called()
 
     def test_result_carries_mode(self, config):
-        engine, _, _, _ = self._make_engine(config)
+        engine, *_ = self._make_engine(config)
         assert engine.query("test", mode="strict").mode == "strict"
         assert engine.query("test", mode="explain").mode == "explain"
+        assert engine.query("test", mode="study").mode == "study"
 
     def test_timing_fields_are_positive(self, config):
-        engine, _, _, _ = self._make_engine(config)
+        engine, *_ = self._make_engine(config)
         result = engine.query("test")
         assert result.retrieve_s >= 0.0
         assert result.generate_s >= 0.0

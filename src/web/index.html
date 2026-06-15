@@ -34,6 +34,10 @@
       align-items: center;
       gap: 14px;
       flex-shrink: 0;
+      transition: border-bottom-color 0.2s;
+    }
+    body.study-active header {
+      border-bottom-color: #238636;
     }
     header .logo {
       font-size: 1rem;
@@ -53,9 +57,34 @@
     header .model-info {
       font-size: 0.75rem;
       color: #6e7681;
-      margin-left: auto;
       white-space: nowrap;
     }
+    #new-chat-btn {
+      margin-left: auto;
+      background: transparent;
+      color: #6e7681;
+      border: 1px solid #30363d;
+      border-radius: 7px;
+      padding: 4px 12px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    #new-chat-btn:hover { color: #c9d1d9; border-color: #6e7681; }
+    #study-indicator {
+      display: none;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #3fb950;
+      background: #0f3d1f;
+      border: 1px solid #238636;
+      border-radius: 10px;
+      padding: 2px 10px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    body.study-active #study-indicator { display: inline-block; }
 
     /* ── Chat area ──────────────────────────────────────────────────────── */
     #chat {
@@ -132,6 +161,34 @@
     .md-body th { background: #0d1117; color: #8b949e; font-weight: 600; }
     .md-body hr { border: none; border-top: 1px solid #30363d; margin: 0.8em 0; }
 
+    /* ── [doc] / [model] source tags ────────────────────────────────────── */
+    .src-doc {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 5px;
+      font-size: 0.72em;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      background: #0d2e5e;
+      color: #79c0ff;
+      border: 1px solid #1f4788;
+      vertical-align: middle;
+      margin: 0 1px;
+    }
+    .src-model {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 5px;
+      font-size: 0.72em;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      background: #2d1f00;
+      color: #e3b341;
+      border: 1px solid #6e4b00;
+      vertical-align: middle;
+      margin: 0 1px;
+    }
+
     /* ── KaTeX display math ─────────────────────────────────────────────── */
     .katex-display { margin: 0.8em 0; overflow-x: auto; }
 
@@ -197,6 +254,7 @@
     }
     .badge.explain { background: #3d2c0a; color: #e3b341; }
     .badge.strict  { background: #161b22; color: #6e7681; border: 1px solid #30363d; }
+    .badge.study   { background: #0f3d1f; color: #3fb950; border: 1px solid #238636; }
 
     /* ── Typing indicator ───────────────────────────────────────────────── */
     .typing-bubble {
@@ -215,6 +273,7 @@
       border-radius: 50%;
       animation: bounce 1.3s infinite;
     }
+    body.study-active .dot { background: #3fb950; }
     .dot:nth-child(2) { animation-delay: 0.2s; }
     .dot:nth-child(3) { animation-delay: 0.4s; }
     @keyframes bounce {
@@ -231,6 +290,10 @@
       gap: 10px;
       align-items: flex-end;
       flex-shrink: 0;
+      transition: border-top-color 0.2s;
+    }
+    body.study-active #input-area {
+      border-top-color: #238636;
     }
     #question {
       flex: 1;
@@ -247,9 +310,37 @@
       max-height: 160px;
       outline: none;
       overflow-y: auto;
+      transition: border-color 0.2s;
     }
     #question:focus { border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,.15); }
+    body.study-active #question:focus { border-color: #238636; box-shadow: 0 0 0 3px rgba(35,134,54,.15); }
     #question::placeholder { color: #6e7681; }
+
+    /* ── Study toggle button ─────────────────────────────────────────────── */
+    #study-btn {
+      background: #21262d;
+      color: #8b949e;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 0 14px;
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-weight: 600;
+      white-space: nowrap;
+      height: 44px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    #study-btn:hover { background: #2d333a; color: #c9d1d9; }
+    #study-btn.active {
+      background: #0f3d1f;
+      color: #3fb950;
+      border-color: #238636;
+    }
+    #study-btn.active:hover { background: #1a5c2e; }
+
     #send-btn {
       background: #238636;
       color: #fff;
@@ -273,9 +364,18 @@
       color: #6e7681;
       font-size: 0.85rem;
       padding: 20px;
-      max-width: 480px;
+      max-width: 520px;
     }
     .welcome strong { color: #8b949e; }
+    .welcome .study-tip {
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: #0f3d1f;
+      border: 1px solid #238636;
+      border-radius: 8px;
+      color: #3fb950;
+      font-size: 0.8rem;
+    }
   </style>
 </head>
 <body>
@@ -284,7 +384,9 @@
   <span class="logo">PDF-AI</span>
   <span class="sep">·</span>
   <span class="doc-name" id="doc-name">Loading…</span>
+  <span id="study-indicator">Study Mode</span>
   <span class="model-info" id="model-info"></span>
+  <button id="new-chat-btn" title="Clear conversation history and start fresh">New conversation</button>
 </header>
 
 <div id="chat">
@@ -293,7 +395,13 @@
     LaTeX formulas are rendered automatically.
     <br/><br/>
     <em>strict mode</em> — factual questions answered from retrieved passages only.<br/>
-    <em>explain mode</em> — triggered by "explain…", "how does…", "derive…" etc.
+    <em>explain mode</em> — triggered by "explain…", "how does…", "derive…" etc.<br/>
+    <em>study mode</em> — Socratic tutor: active recall, Feynman checks, source tagging.
+    <div class="study-tip">
+      Toggle <strong>Study</strong> to activate the Socratic tutor.<br/>
+      Every claim will be tagged <strong>[doc]</strong> (your PDF) or <strong>[model]</strong> (general knowledge).<br/>
+      Type <em>summary</em> or <em>done</em> for a session recap.
+    </div>
   </div>
 </div>
 
@@ -303,12 +411,43 @@
     placeholder="Ask a question… (Enter to send · Shift+Enter for newline)"
     rows="1"
   ></textarea>
+  <button id="study-btn" title="Toggle study mode (Socratic tutor)">Study</button>
   <button id="send-btn">Send</button>
 </div>
 
 <script>
   // ── marked.js configuration ───────────────────────────────────────────────
   marked.use({ gfm: true, breaks: false });
+
+  // ── New conversation ──────────────────────────────────────────────────────
+  document.getElementById('new-chat-btn').addEventListener('click', async () => {
+    await fetch('/reset', { method: 'POST' });
+    chatEl.innerHTML = '';
+    chatEl.appendChild(welcomeEl);
+    welcomeEl.style.display = '';
+    appendNotice('Conversation reset — history cleared. Starting fresh.');
+  });
+
+  // ── Study mode state ──────────────────────────────────────────────────────
+  let studyMode = false;
+
+  const studyBtn = document.getElementById('study-btn');
+  studyBtn.addEventListener('click', () => {
+    studyMode = !studyMode;
+    studyBtn.classList.toggle('active', studyMode);
+    document.body.classList.toggle('study-active', studyMode);
+
+    if (studyMode) {
+      appendNotice(
+        '📖 Study mode ON — the tutor will ask for your attempt before explaining. ' +
+        'Every claim is tagged <span class="src-doc">doc</span> (your PDF) or ' +
+        '<span class="src-model">model</span> (general knowledge). ' +
+        'Type <em>summary</em> or <em>done</em> for a session recap.'
+      );
+    } else {
+      appendNotice('Study mode OFF — back to normal chat.');
+    }
+  });
 
   // ── Math-safe render: LaTeX → KaTeX, text → marked ───────────────────────
   function renderContent(raw) {
@@ -343,7 +482,6 @@
           output: 'html',
         });
       } catch (_) {
-        // Fall back to raw LaTeX wrapped in <code>
         rendered = display
           ? `<pre><code>$$${math}$$</code></pre>`
           : `<code>$${math}$</code>`;
@@ -351,13 +489,18 @@
       html = html.split(id).join(rendered);
     }
 
+    // Highlight [doc] and [model] source tags
+    html = html
+      .replace(/\[doc\]/g,   '<span class="src-doc">doc</span>')
+      .replace(/\[model\]/g, '<span class="src-model">model</span>');
+
     return html;
   }
 
   // ── DOM helpers ───────────────────────────────────────────────────────────
-  const chatEl   = document.getElementById('chat');
+  const chatEl    = document.getElementById('chat');
   const questionEl = document.getElementById('question');
-  const sendBtn  = document.getElementById('send-btn');
+  const sendBtn   = document.getElementById('send-btn');
   const welcomeEl = document.getElementById('welcome');
 
   function scrollBottom() {
@@ -370,6 +513,19 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  // ── System notice (study mode toggle feedback) ────────────────────────────
+  function appendNotice(html) {
+    welcomeEl.style.display = 'none';
+    const div = document.createElement('div');
+    div.className = 'msg assistant';
+    div.innerHTML = `
+      <div class="bubble" style="border-style:dashed; font-size:0.82rem; color:#8b949e; padding:8px 14px;">
+        ${html}
+      </div>`;
+    chatEl.appendChild(div);
+    scrollBottom();
   }
 
   // ── Append user message ───────────────────────────────────────────────────
@@ -492,7 +648,7 @@
       const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, study_mode: studyMode }),
       });
 
       if (!res.ok) {
@@ -502,6 +658,12 @@
 
       const data = await res.json();
       chatEl.removeChild(typing);
+      if (data.compacted) {
+        appendNotice(
+          '↩ Context compacted — older turns summarised locally to stay within ' +
+          "the model's context window. Recent conversation is preserved in full."
+        );
+      }
       chatEl.appendChild(buildAssistant(data));
       scrollBottom();
     } catch (err) {
